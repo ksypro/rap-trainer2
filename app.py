@@ -4,6 +4,7 @@ import numpy as np
 import io
 import os
 import time
+import calendar
 from datetime import datetime
 import streamlit.components.v1 as components
 
@@ -66,6 +67,47 @@ st.markdown("""
     }
     .ios-body { font-size: 17px; color: #FFFFFF; line-height: 1.4; }
     .ios-caption { font-size: 13px; color: #8E8E93; }
+
+    /* Calendar Styling */
+    .calendar-table {
+        width: 100%;
+        border-collapse: collapse;
+        color: white;
+        margin-top: 10px;
+    }
+    .calendar-table th {
+        color: #8E8E93;
+        font-size: 12px;
+        padding-bottom: 10px;
+        text-transform: uppercase;
+    }
+    .calendar-table td {
+        text-align: center;
+        padding: 8px 0;
+        height: 40px;
+        width: 14.28%;
+    }
+    .day-num {
+        display: inline-flex;
+        justify-content: center;
+        align-items: center;
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        font-size: 14px;
+        font-weight: 600;
+    }
+    .day-active {
+        background-color: #32D74B;
+        color: black;
+        box-shadow: 0 0 10px rgba(50, 215, 75, 0.4);
+    }
+    .day-today {
+        border: 2px solid white;
+    }
+    .day-empty {
+        color: #333;
+    }
 
     /* Progress Bar */
     .progress-container {
@@ -131,22 +173,13 @@ st.markdown("""
     div.stButton > button:hover { background-color: #2C2C2E; border: 1px solid #444; }
     button[kind="primary"] { background-color: #32D74B !important; color: #000000 !important; }
     button[kind="primary"]:hover { opacity: 0.9; }
-
-    /* Tags for Stats */
-    .stat-tag {
-        background: #333;
-        padding: 4px 8px;
-        border-radius: 6px;
-        font-size: 12px;
-        margin-right: 5px;
-    }
     </style>
     """, unsafe_allow_html=True)
 
 # --- 3. 核心邏輯層 ---
 class RapTrainerApp:
     def __init__(self):
-        self.data_file = "rap_log_v7.csv" # 更新版本號
+        self.data_file = "rap_log_v8.csv"
         self.note_multipliers = {"1/4": 1, "1/8": 2, "1/3": 3, "1/16": 4}
         
         # GitHub 初始化
@@ -195,7 +228,7 @@ class RapTrainerApp:
         if 'history' not in st.session_state:
             st.session_state.history = self.history
         
-        # === 關鍵修改：啟動時讀取上次的 BPM ===
+        # 啟動時讀取上次 BPM
         if 'bpm_initialized' not in st.session_state:
             if not self.history.empty:
                 try:
@@ -237,10 +270,8 @@ class RapTrainerApp:
         return st.session_state.history['Duration'].sum()
 
     def get_chopper_minutes(self):
-        """只計算 1/16 音符的訓練時間"""
         if st.session_state.history.empty: return 0
         df = st.session_state.history
-        # 篩選 Note_Type 包含 "1/16" 的資料
         chopper_df = df[df['Note_Type'].str.contains("1/16", na=False)]
         return chopper_df['Duration'].sum()
 
@@ -281,8 +312,6 @@ if st.session_state.page == "home":
     st.markdown('<div class="ios-headline">總覽</div>', unsafe_allow_html=True)
     
     df = st.session_state.history
-    
-    # === 關鍵修改：只使用快嘴時間 (Chopper Mins) 計算等級 ===
     chopper_mins = app.get_chopper_minutes()
     
     level = int(chopper_mins // 120)
@@ -293,7 +322,7 @@ if st.session_state.page == "home":
     titles = ["Novice", "Apprentice", "Chopper", "Master", "God Speed"]
     current_title = titles[min(level, len(titles)-1)]
 
-    # === Level Card ===
+    # Level Card
     st.markdown(f"""
 <div class="glass-card">
 <div class="ios-subhead">CHOPPER LEVEL (1/16 Only)</div>
@@ -309,10 +338,9 @@ if st.session_state.page == "home":
 </div>
 """, unsafe_allow_html=True)
 
-    # === 數據卡片 ===
+    # Stats Summary
     c1, c2 = st.columns(2)
     days_streak = df['Date'].dt.date.nunique() if not df.empty else 0
-    # 這裡顯示目前快嘴 (1/16) 的最高 BPM 紀錄
     max_chopper_bpm = 0
     if not df.empty:
         chopper_df = df[df['Note_Type'].str.contains("1/16", na=False)]
@@ -407,7 +435,7 @@ elif st.session_state.page == "metronome":
                     st.session_state.start_time = None
                     st.rerun()
 
-    # JS 引擎 (含鼓聲)
+    # JS 引擎 (鼓聲)
     js_bpm = st.session_state.bpm
     js_playing = "true" if st.session_state.playing else "false"
     note_mult = app.note_multipliers.get(selected_note_key, 1)
@@ -483,17 +511,60 @@ elif st.session_state.page == "stats":
     else:
         df = st.session_state.history
         
-        # 1. 輸出按鈕
+        # === 1. 月曆顯示 (新增功能) ===
+        now = datetime.now()
+        year, month = now.year, now.month
+        month_name = calendar.month_name[month]
+        cal = calendar.monthcalendar(year, month)
+        
+        # 篩選當月有訓練的日期
+        mask = (df['Date'].dt.year == year) & (df['Date'].dt.month == month)
+        trained_days = set(df.loc[mask, 'Date'].dt.day.tolist())
+        today = now.day
+
+        # 生成月曆 HTML
+        cal_html = f"""
+        <div class="glass-card">
+            <div class="ios-subhead">{month_name} {year}</div>
+            <table class="calendar-table">
+                <thead>
+                    <tr>
+                        <th>Mo</th><th>Tu</th><th>We</th><th>Th</th><th>Fr</th><th>Sa</th><th>Su</th>
+                    </tr>
+                </thead>
+                <tbody>
+        """
+        for week in cal:
+            cal_html += "<tr>"
+            for day in week:
+                if day == 0:
+                    cal_html += "<td></td>"
+                else:
+                    active_class = "day-active" if day in trained_days else ""
+                    today_class = "day-today" if day == today else ""
+                    color_style = "color: white;" if day in trained_days else "color: #555;"
+                    
+                    cal_html += f"""
+                    <td>
+                        <div class="day-num {active_class} {today_class}" style="{color_style}">
+                            {day}
+                        </div>
+                    </td>
+                    """
+            cal_html += "</tr>"
+        cal_html += "</tbody></table></div>"
+        
+        st.markdown(cal_html, unsafe_allow_html=True)
+
+        # === 2. 輸出與分析 ===
         csv = df.to_csv(index=False).encode('utf-8')
         st.download_button("📤 輸出 CSV 記錄", csv, "rap_log.csv", "text/csv", use_container_width=True)
         
         st.markdown("<br>", unsafe_allow_html=True)
 
-        # 2. 分類檢視 (Tabs)
         tab_list = ["全部", "1/16 快嘴", "1/8 基礎", "1/3 三連音"]
         selected_tab = st.selectbox("選擇分析模式", tab_list)
         
-        # 根據選擇過濾數據
         filtered_df = df.copy()
         if selected_tab == "1/16 快嘴":
             filtered_df = df[df['Note_Type'].str.contains("1/16", na=False)]
@@ -502,7 +573,6 @@ elif st.session_state.page == "stats":
         elif selected_tab == "1/3 三連音":
             filtered_df = df[df['Note_Type'].str.contains("1/3", na=False)]
         
-        # 3. 顯示最高 BPM 紀錄
         if not filtered_df.empty:
             max_val = filtered_df['BPM'].max()
             avg_val = filtered_df['BPM'].mean()
@@ -522,18 +592,15 @@ elif st.session_state.page == "stats":
             </div>
             """, unsafe_allow_html=True)
             
-            # 4. 趨勢圖 (只畫選中的音符類型)
             st.markdown('<div class="ios-subhead">BPM 成長趨勢</div>', unsafe_allow_html=True)
             chart_data = filtered_df.sort_values('Date')
             st.line_chart(chart_data.set_index('Date')['BPM'], color="#32D74B")
         else:
             st.info(f"尚無 {selected_tab} 的訓練記錄。")
 
-        # 5. 各音符排行榜 (Summary)
         st.markdown('<div class="ios-subhead">各音符最高 BPM 紀錄</div>', unsafe_allow_html=True)
         if not df.empty:
             best_scores = df.groupby('Note_Type')['BPM'].max().reset_index()
-            # 簡單美化表格
             st.dataframe(
                 best_scores.rename(columns={'Note_Type': '音符類型', 'BPM': '最高紀錄'}),
                 use_container_width=True,
