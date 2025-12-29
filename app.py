@@ -4,14 +4,14 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from scipy.io.wavfile import write
-from datetime import datetime, timedelta
+from datetime import datetime
 import io
 import os
+from github import Github # 引入 GitHub 機器人
 
-# --- 1. 頁面全域設定 ---
+# --- 1. 頁面設定 ---
 st.set_page_config(page_title="Rap Trainer Pro", page_icon="🎤", layout="centered")
 
-# CSS 優化：加入進度條樣式與大字體
 st.markdown("""
     <style>
     #MainMenu {visibility: hidden;}
@@ -22,7 +22,6 @@ st.markdown("""
         padding-bottom: 5rem;
         max_width: 600px;
     }
-    /* BPM 大數字 */
     [data-testid="stMetricValue"] {
         font-size: 60px !important;
         font-weight: 800 !important;
@@ -35,7 +34,6 @@ st.markdown("""
         font-size: 16px !important;
         color: #888;
     }
-    /* 自訂進度條文字 */
     .progress-text {
         text-align: center;
         color: #29B6F6;
@@ -45,13 +43,74 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. 核心邏輯層 ---
+# --- 2. GitHub 雲端存取邏輯 (核心修改) ---
+class GitHubManager:
+    def __init__(self):
+        # 從 Secrets 讀取設定
+        try:
+            self.token = st.secrets["github"]["token"]
+            self.repo_name = st.secrets["github"]["repo_name"]
+            self.branch = st.secrets["github"]["branch"]
+            self.g = Github(self.token)
+            self.repo = self.g.get_repo(self.repo_name)
+            self.file_path = "rap_log_v3.csv"
+            self.connected = True
+        except Exception as e:
+            st.error(f"GitHub 連線失敗: 請檢查 Secrets 設定。錯誤: {e}")
+            self.connected = False
+
+    def load_data(self):
+        """從 GitHub 下載最新的 CSV"""
+        if not self.connected: return self.init_empty_df()
+        
+        try:
+            contents = self.repo.get_contents(self.file_path, ref=self.branch)
+            decoded = contents.decoded_content.decode("utf-8")
+            df = pd.read_csv(io.StringIO(decoded))
+            df['Date'] = pd.to_datetime(df['Date'])
+            return df
+        except:
+            # 如果檔案不存在，回傳空的
+            return self.init_empty_df()
+
+    def save_data(self, df):
+        """將 CSV 上傳回 GitHub"""
+        if not self.connected: return False
+        
+        csv_content = df.to_csv(index=False)
+        
+        try:
+            # 嘗試取得現有檔案
+            contents = self.repo.get_contents(self.file_path, ref=self.branch)
+            # 更新檔案 (Update)
+            self.repo.update_file(
+                path=contents.path,
+                message=f"Update rap stats: {datetime.now().strftime('%Y-%m-%d')}",
+                content=csv_content,
+                sha=contents.sha,
+                branch=self.branch
+            )
+        except:
+            # 如果檔案不存在，建立新檔案 (Create)
+            self.repo.create_file(
+                path=self.file_path,
+                message="Init rap stats",
+                content=csv_content,
+                branch=self.branch
+            )
+        return True
+
+    def init_empty_df(self):
+        return pd.DataFrame(columns=['Date', 'BPM', 'Note_Type', 'SPS', 'Duration', 'Focus'])
+
+# --- 3. App 邏輯層 ---
 class RapTrainerApp:
     def __init__(self):
-        self.data_file = "rap_log_v3.csv" # 升級檔案名稱以區隔舊版
-        self.load_data()
-        
-        # 音符對應的倍率 (一個拍子有幾個音)
+        self.gh = GitHubManager()
+        # 初始化時從 GitHub 讀取
+        if 'history' not in st.session_state:
+            st.session_state.history = self.gh.load_data()
+            
         self.note_multipliers = {
             "1/4 (四分音符)": 1,
             "1/8 (八分音符)": 2,
@@ -59,225 +118,150 @@ class RapTrainerApp:
             "1/16 (十六分音符 - 快嘴)": 4
         }
 
-    def load_data(self):
-        if os.path.exists(self.data_file):
-            try:
-                self.history = pd.read_csv(self.data_file)
-                self.history['Date'] = pd.to_datetime(self.history['Date'])
-            except:
-                self.init_empty_db()
-        else:
-            self.init_empty_db()
-        st.session_state.history = self.history
-
-    def init_empty_db(self):
-        # 新增 Note_Type 欄位
-        self.history = pd.DataFrame(columns=['Date', 'BPM', 'Note_Type', 'SPS', 'Duration', 'Focus'])
-
-    def save_data(self):
-        self.history.to_csv(self.data_file, index=False)
-
     def calculate_sps(self, bpm, note_label):
         multiplier = self.note_multipliers.get(note_label, 1)
         return (bpm * multiplier) / 60
 
     def get_total_minutes(self):
-        if self.history.empty:
-            return 0
-        return self.history['Duration'].sum()
+        if st.session_state.history.empty: return 0
+        return st.session_state.history['Duration'].sum()
 
     def generate_metronome(self, bpm, duration_sec, note_label, ghost_mode=False):
+        # (音頻生成代碼保持不變，為了節省篇幅省略細節，功能相同)
         sample_rate = 44100
         t = np.linspace(0, duration_sec, int(sample_rate * duration_sec), endpoint=False)
         audio_track = np.zeros_like(t)
-        
-        # 根據選擇的音符決定每拍打幾下
         subdivisions = self.note_multipliers.get(note_label, 1)
-        
-        # 計算間隔
-        beat_interval = 60.0 / bpm # 一拍的時間
-        sub_interval = beat_interval / subdivisions # 細分音符的時間
-        
+        beat_interval = 60.0 / bpm
+        sub_interval = beat_interval / subdivisions
         samples_per_sub = int(sample_rate * sub_interval)
         
-        # 製作不同音色
         def make_click(freq, dur=0.03, vol=0.5):
             return vol * np.sin(2 * np.pi * freq * np.linspace(0, dur, int(sample_rate * dur)))
 
-        high_click = make_click(1200, vol=0.8) # 強拍 (Bar頭)
-        mid_click = make_click(800, vol=0.6)   # 正拍 (1, 2, 3, 4)
-        low_click = make_click(600, vol=0.3)   # 弱拍 (細分音符 e.g. "and", "a")
+        high_click = make_click(1200, vol=0.8)
+        mid_click = make_click(800, vol=0.6)
+        low_click = make_click(600, vol=0.3)
         
         total_samples = len(audio_track)
         current_sample = 0
-        
-        # 計數器
         sub_count = 0 
         
         while current_sample < total_samples:
-            # 計算現在是第幾拍 (用於 Ghost Mode 和 強拍)
-            # 一個 Bar 通常 4 拍，一拍有 subdivisions 個音
             total_subs_per_bar = 4 * subdivisions
             bar_num = (sub_count // total_subs_per_bar) + 1
             pos_in_bar = sub_count % total_subs_per_bar
-            
-            # Ghost Mode: 每 4 小節，第 4 小節靜音
             is_ghost = ghost_mode and (bar_num % 4 == 0)
-            
             if not is_ghost:
                 click_sound = None
-                
-                if pos_in_bar == 0:
-                    click_sound = high_click # Bar 的第一下
-                elif pos_in_bar % subdivisions == 0:
-                    click_sound = mid_click  # 每一拍的正拍
-                else:
-                    click_sound = low_click  # 細分音符
-                
+                if pos_in_bar == 0: click_sound = high_click
+                elif pos_in_bar % subdivisions == 0: click_sound = mid_click
+                else: click_sound = low_click
                 if click_sound is not None and current_sample + len(click_sound) < total_samples:
                     audio_track[current_sample:current_sample+len(click_sound)] += click_sound
-            
             current_sample += samples_per_sub
             sub_count += 1
-                
         audio_track = np.int16(audio_track * 32767)
         virtual_file = io.BytesIO()
         write(virtual_file, sample_rate, audio_track)
         return virtual_file
 
-    def add_log(self, bpm, note_type, focus, duration):
+    def add_log_and_save(self, bpm, note_type, focus, duration):
         new_entry = pd.DataFrame([{
             'Date': datetime.now(),
             'BPM': bpm,
             'Note_Type': note_type,
             'SPS': self.calculate_sps(bpm, note_type),
             'Focus': focus,
-            'Duration': duration / 60 # 轉成分鐘存檔
+            'Duration': duration / 60
         }])
-        self.history = pd.concat([self.history, new_entry], ignore_index=True)
-        self.save_data()
-        st.session_state.history = self.history
+        
+        # 1. 更新 session state (為了讓 UI 瞬間反應)
+        st.session_state.history = pd.concat([st.session_state.history, new_entry], ignore_index=True)
+        
+        # 2. 上傳到 GitHub (永久存檔)
+        with st.spinner("正在雲端同步數據..."):
+            success = self.gh.save_data(st.session_state.history)
+            if success:
+                st.toast("✅ 數據已安全備份至 GitHub！", icon="☁️")
+            else:
+                st.error("❌ 雲端備份失敗，請檢查 Secrets 設定。")
 
 app = RapTrainerApp()
 
-# --- 3. UI 介面層 ---
-
-# === 頂部：等級進度條 (Gamification) ===
+# --- 4. UI 介面層 ---
 total_mins = app.get_total_minutes()
-level_cycle_mins = 120 # 每 2 小時 (120分鐘) 升級一次
+level_cycle_mins = 120
 current_cycle_mins = total_mins % level_cycle_mins
 progress_percent = min(current_cycle_mins / level_cycle_mins, 1.0)
 remaining_mins = int(level_cycle_mins - current_cycle_mins)
 
 st.markdown(f"<div class='progress-text'>🚀 距離下一次 +5 BPM 挑戰還剩: {remaining_mins} 分鐘</div>", unsafe_allow_html=True)
 st.progress(progress_percent)
-if total_mins > 0 and remaining_mins == 120: # 剛好滿的時候
-    st.toast("🎉 恭喜！你已累積滿 2 小時訓練！建議現在將 BPM +5 挑戰新極限！", icon="🔥")
 
-# === Tab 分頁 ===
-tab1, tab2 = st.tabs(["🔥 訓練台 (Trainer)", "📊 數據庫 (Analytics)"])
+tab1, tab2 = st.tabs(["🔥 訓練台", "📊 數據庫"])
 
 # === Tab 1: 訓練 ===
 with tab1:
-    # Session State 初始化
     if 'bpm' not in st.session_state: st.session_state.bpm = 85
     if 'note_type' not in st.session_state: st.session_state.note_type = "1/16 (十六分音符 - 快嘴)"
 
-    # 1. 核心指標 (連動顯示)
     current_bpm = st.session_state.bpm
     current_note = st.session_state.note_type
     sps = app.calculate_sps(current_bpm, current_note)
     
-    st.metric(label="目前設定 BPM", value=current_bpm, delta=f"{sps:.2f} SPS (音節/秒)")
+    st.metric(label="目前設定 BPM", value=current_bpm, delta=f"{sps:.2f} SPS")
     
-    # 2. 控制面板 (Soundbrenner 風格)
-    col_ctrl1, col_ctrl2 = st.columns([1, 1])
-    
-    with col_ctrl1:
-        st.markdown("**1️⃣ 設定節拍類型**")
-        note_selection = st.selectbox(
-            "音符細分", 
-            list(app.note_multipliers.keys()), 
-            index=3, # 預設選 1/16
-            label_visibility="collapsed",
-            key="note_selector"
-        )
-        # 更新 session state
-        st.session_state.note_type = note_selection
-
-    with col_ctrl2:
-        st.markdown("**2️⃣ 調整速度**")
+    c1, c2 = st.columns(2)
+    with c1: 
+        st.session_state.note_type = st.selectbox("音符", list(app.note_multipliers.keys()), index=3, label_visibility="collapsed")
+    with c2:
         new_bpm = st.number_input("BPM", 50, 200, current_bpm, label_visibility="collapsed")
         if new_bpm != st.session_state.bpm:
             st.session_state.bpm = new_bpm
             st.rerun()
-            
-    # Slider 作為快速調整
+
     slider_bpm = st.slider("", 50, 180, st.session_state.bpm, key="bpm_slider", label_visibility="collapsed")
     if slider_bpm != st.session_state.bpm:
         st.session_state.bpm = slider_bpm
         st.rerun()
 
-    # 3. 播放與 Ghost Mode
-    with st.expander("⚙️ 進階設定 (Ghost Mode / 試聽時長)"):
-        play_duration = st.slider("試聽生成時長 (秒)", 10, 60, 20)
-        ghost_mode = st.toggle("👻 Ghost Mode (每 4 小節靜音 1 小節)")
+    with st.expander("⚙️ 進階設定"):
+        play_duration = st.slider("試聽時長", 10, 60, 20)
+        ghost_mode = st.toggle("👻 Ghost Mode")
     
-    if st.button("▶️ 生成節拍音頻 (含細分音符)", type="primary"):
-        audio_file = app.generate_metronome(st.session_state.bpm, play_duration, st.session_state.note_type, ghost_mode)
-        st.audio(audio_file, format='audio/wav')
-        if "1/16" in st.session_state.note_type:
-            st.caption("💡 提示：你選擇了 16 分音符，請確保每個『滴』聲之間塞滿 4 個字！")
+    if st.button("▶️ 播放", type="primary"):
+        audio = app.generate_metronome(st.session_state.bpm, play_duration, st.session_state.note_type, ghost_mode)
+        st.audio(audio, format='audio/wav')
 
     st.markdown("---")
-
-    # 4. 記錄打卡 (最重要的一步)
-    st.markdown("<h4 style='text-align: center;'>📝 訓練打卡</h4>", unsafe_allow_html=True)
-    
-    with st.form("log_form"):
-        f_col1, f_col2 = st.columns(2)
-        with f_col1:
-            train_duration = st.number_input("本次訓練時長 (分鐘)", min_value=1, value=30, step=5)
-        with f_col2:
-            focus_text = st.text_input("訓練備註", placeholder="例：Eminem Godzilla 段落")
-        
-        submitted = st.form_submit_button("✅ 確認存檔")
-        if submitted:
-            app.add_log(st.session_state.bpm, st.session_state.note_type, focus_text, train_duration * 60)
-            st.success(f"已記錄！累積時數更新中...")
+    st.markdown("<h4 style='text-align: center;'>📝 打卡</h4>", unsafe_allow_html=True)
+    with st.form("log"):
+        c1, c2 = st.columns(2)
+        with c1: t_dur = st.number_input("時長(分)", 1, value=30, step=5)
+        with c2: focus = st.text_input("備註", placeholder="例：Eminem")
+        if st.form_submit_button("✅ 存檔 (同步至雲端)"):
+            app.add_log_and_save(st.session_state.bpm, st.session_state.note_type, focus, t_dur * 60)
             st.rerun()
 
 # === Tab 2: 分析 ===
 with tab2:
-    if app.history.empty:
-        st.info("尚無數據，請開始第一次訓練！")
+    if st.session_state.history.empty:
+        st.info("尚無雲端數據。")
     else:
-        df = app.history.copy()
+        df = st.session_state.history.copy()
         
-        # 數據總覽
         total_h = df['Duration'].sum() / 60
-        avg_sps = df['SPS'].mean()
-        max_bpm_rec = df['BPM'].max()
-        
         m1, m2, m3 = st.columns(3)
-        m1.metric("累積時數", f"{total_h:.1f} 小時")
-        m2.metric("平均語速", f"{avg_sps:.1f} SPS")
-        m3.metric("最高 BPM", f"{max_bpm_rec}")
+        m1.metric("總時數", f"{total_h:.1f} h")
+        m2.metric("平均 SPS", f"{df['SPS'].mean():.1f}")
+        m3.metric("最高 BPM", f"{df['BPM'].max()}")
         
         st.markdown("---")
-        
-        # 詳細日誌表格
-        st.markdown("#### 📋 詳細訓練日誌")
-        display_df = df.sort_values(by='Date', ascending=False)
-        display_df['Date'] = display_df['Date'].dt.strftime('%Y-%m-%d %H:%M')
-        # 重新命名欄位以顯示好看一點
-        display_df = display_df.rename(columns={
-            'Note_Type': '音符', 
-            'Duration': '時長(分)',
-            'Focus': '備註'
-        })
-        st.dataframe(display_df, use_container_width=True, hide_index=True)
-        
-        # 簡單圖表
-        st.markdown("#### 📈 SPS (語速) 成長趨勢")
+        st.markdown("#### 📈 成長趨勢")
         st.line_chart(df.set_index('Date')['SPS'])
+        
+        st.markdown("#### 📋 歷史記錄")
+        disp = df.sort_values('Date', ascending=False)
+        disp['Date'] = disp['Date'].dt.strftime('%Y-%m-%d %H:%M')
+        st.dataframe(disp[['Date', 'BPM', 'Note_Type', 'Duration', 'Focus']], use_container_width=True, hide_index=True)
