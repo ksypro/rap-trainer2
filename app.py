@@ -7,7 +7,7 @@ import time
 from datetime import datetime
 import streamlit.components.v1 as components
 
-# 嘗試引入 Github
+# 嘗試引入 Github (若無配置則忽略)
 try:
     from github import Github
     has_github = True
@@ -15,17 +15,17 @@ except ImportError:
     has_github = False
 
 # --- 1. 頁面全域設定 ---
-st.set_page_config(page_title="Rap Trainer", page_icon="🎤", layout="centered")
+st.set_page_config(page_title="Rap Trainer Pro", page_icon="🎤", layout="centered")
 
 # --- 2. 2025 Apple Design System (CSS 修復版) ---
 st.markdown("""
     <style>
-    /* 全局重置 */
+    /* 全局字體與背景重置 */
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
     
     html, body, [class*="css"] {
         font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;
-        background-color: #000000 !important;
+        background-color: #000000 !important; /* 純黑背景 */
         color: #FFFFFF !important;
     }
 
@@ -35,36 +35,36 @@ st.markdown("""
     header {visibility: hidden;}
     
     .block-container {
-        padding-top: 1rem;
+        padding-top: 2rem;
         padding-bottom: 6rem;
-        max_width: 480px; /* iPhone 寬度優化 */
+        max_width: 500px; /* 手機寬度優化 */
         margin: 0 auto;
     }
 
-    /* === iOS Glass Cards === */
+    /* === iOS Glass Cards (玻璃擬態) === */
     .glass-card {
-        background: rgba(28, 28, 30, 1); /* 加深背景，避免過透導致文字不清 */
+        background: #1C1C1E; /* iOS 深色模式卡片底色 */
         border: 1px solid rgba(255, 255, 255, 0.1);
         border-radius: 20px;
         padding: 24px;
         margin-bottom: 16px;
     }
     
-    /* 文字層級 (Apple Style) */
+    /* 文字層級 */
     .ios-headline {
         font-size: 34px;
         font-weight: 700;
         letter-spacing: -0.5px;
         color: #FFFFFF;
-        margin-bottom: 8px;
+        margin-bottom: 12px;
     }
     .ios-subhead {
-        font-size: 15px;
+        font-size: 13px;
         font-weight: 600;
         color: #8E8E93; /* Apple Gray */
         text-transform: uppercase;
         letter-spacing: 0.5px;
-        margin-bottom: 4px;
+        margin-bottom: 6px;
     }
     .ios-body {
         font-size: 17px;
@@ -83,12 +83,14 @@ st.markdown("""
         border-radius: 4px;
         width: 100%;
         margin-top: 16px;
+        margin-bottom: 8px;
         overflow: hidden;
     }
     .progress-bar {
         background: #32D74B; /* iOS System Green */
         height: 100%;
         border-radius: 4px;
+        transition: width 0.5s ease;
     }
 
     /* === 節拍器介面 === */
@@ -98,30 +100,37 @@ st.markdown("""
         text-align: center;
         color: #FFFFFF;
         line-height: 1;
-        font-variant-numeric: tabular-nums; /* 數字等寬，避免跳動 */
+        font-variant-numeric: tabular-nums;
+        text-shadow: 0 0 20px rgba(50, 215, 75, 0.3); /* 綠色微光 */
     }
     .bpm-label {
         font-size: 17px;
         font-weight: 600;
         text-align: center;
-        color: #32D74B; /* Green Accent */
-        margin-bottom: 24px;
+        color: #32D74B;
+        margin-bottom: 30px;
     }
 
     /* 輸入框與滑桿優化 */
-    .stSlider > div > div > div {
-        background-color: #32D74B !important; /* Green slider */
+    div.stSlider > div[data-baseweb="slider"] > div > div {
+        background-color: #32D74B !important;
     }
+    div.stSlider > div[data-baseweb="slider"] > div > div > div {
+        background-color: #32D74B !important;
+    }
+    
+    /* 數字輸入框 */
     .stNumberInput input {
         text-align: center;
         background-color: #1C1C1E !important;
         color: white !important;
+        border: 1px solid #333;
         border-radius: 12px;
         font-weight: bold;
         font-size: 20px;
     }
 
-    /* 按鈕樣式 (iOS Filled Button) */
+    /* 按鈕樣式 */
     div.stButton > button {
         background-color: #1C1C1E;
         color: #FFFFFF;
@@ -131,31 +140,29 @@ st.markdown("""
         font-size: 17px;
         padding: 12px 0;
         height: auto;
+        transition: all 0.2s;
     }
     div.stButton > button:hover {
         background-color: #2C2C2E;
+        border: 1px solid #444;
     }
-    /* Primary Button (Play/Action) */
+    /* 主要按鈕 (綠色) */
     button[kind="primary"] {
         background-color: #32D74B !important;
         color: #000000 !important;
     }
+    button[kind="primary"]:hover {
+        opacity: 0.9;
+    }
 
-    /* Tab 導航列 (Sticky Bottom) */
-    .nav-container {
-        position: fixed;
-        bottom: 20px;
-        left: 50%;
-        transform: translateX(-50%);
-        background: rgba(44, 44, 46, 0.8);
-        backdrop-filter: blur(20px);
-        -webkit-backdrop-filter: blur(20px);
-        padding: 8px;
-        border-radius: 32px;
+    /* 導航列 */
+    .nav-wrapper {
         display: flex;
-        gap: 8px;
-        z-index: 999;
-        border: 1px solid rgba(255,255,255,0.1);
+        justify-content: center;
+        gap: 10px;
+        margin-bottom: 20px;
+        padding-bottom: 20px;
+        border-bottom: 1px solid #333;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -178,7 +185,7 @@ class RapTrainerApp:
         self.load_data()
 
     def load_data(self):
-        # 1. 嘗試從 GitHub
+        # 1. 嘗試從 GitHub 讀取
         data_loaded = False
         if self.gh_client:
             try:
@@ -190,7 +197,7 @@ class RapTrainerApp:
             except:
                 pass
         
-        # 2. 嘗試從本地
+        # 2. 嘗試從本地讀取
         if not data_loaded:
             if os.path.exists(self.data_file):
                 try:
@@ -200,10 +207,17 @@ class RapTrainerApp:
             else:
                 self.init_empty_db()
 
-        # 3. 關鍵修復：確保 Date 是 datetime 格式，否則會報 AttributeError
-        if not self.history.empty and 'Date' in self.history.columns:
-            self.history['Date'] = pd.to_datetime(self.history['Date'], errors='coerce')
-            self.history = self.history.dropna(subset=['Date']) # 刪除壞掉的日期資料
+        # 3. 資料清洗 (修復 AttributeError)
+        if not self.history.empty:
+            # 強制轉換日期格式，錯誤變成 NaT
+            if 'Date' in self.history.columns:
+                self.history['Date'] = pd.to_datetime(self.history['Date'], errors='coerce')
+                self.history = self.history.dropna(subset=['Date']) # 移除壞掉的日期
+            
+            # 確保數字欄位正確
+            for col in ['Duration', 'BPM', 'SPS']:
+                if col in self.history.columns:
+                    self.history[col] = pd.to_numeric(self.history[col], errors='coerce').fillna(0)
         
         if 'history' not in st.session_state:
             st.session_state.history = self.history
@@ -212,10 +226,11 @@ class RapTrainerApp:
         self.history = pd.DataFrame(columns=['Date', 'BPM', 'Note_Type', 'SPS', 'Duration', 'Focus'])
 
     def save_data(self, df):
+        # 存本地
         df.to_csv(self.data_file, index=False)
         st.session_state.history = df
         
-        # GitHub Sync
+        # 存 GitHub
         if self.gh_client:
             try:
                 repo = self.gh_client.get_repo(self.repo_name)
@@ -245,41 +260,32 @@ app = RapTrainerApp()
 if 'bpm' not in st.session_state: st.session_state.bpm = 85
 if 'playing' not in st.session_state: st.session_state.playing = False
 if 'page' not in st.session_state: st.session_state.page = "home"
-if 'start_time' not in st.session_state: st.session_state.start_time = None # 用於自動計時
+if 'start_time' not in st.session_state: st.session_state.start_time = None 
 
-# Callback 函數
 def update_bpm_from_slider(): st.session_state.bpm = st.session_state.bpm_slider
 def update_bpm_from_number(): st.session_state.bpm = st.session_state.bpm_number
 
 def toggle_play():
     st.session_state.playing = not st.session_state.playing
     if st.session_state.playing:
-        # 開始播放：記錄開始時間
-        st.session_state.start_time = time.time()
+        st.session_state.start_time = time.time() # 開始計時
     else:
-        # 停止播放：不需要馬上存，待用戶確認
+        # 停止時不自動存，交給 UI 處理
         pass
 
 def nav_to(page_name):
     st.session_state.page = page_name
 
-# --- 5. 導航列 (模擬 App 底部 Tab) ---
-# 使用 container 置底
-st.markdown("""
-<div class="nav-container">
-    </div>
-""", unsafe_allow_html=True)
-
-# 由於 Streamlit 按鈕無法直接嵌入自定義 HTML div，我們使用頂部 Columns 作為替代，但樣式優化
+# --- 5. 介面導航 ---
 nav1, nav2, nav3 = st.columns(3)
 with nav1:
-    if st.button("🏠 主頁", use_container_width=True, type="secondary"): nav_to("home")
+    if st.button("🏠 主頁", use_container_width=True): nav_to("home")
 with nav2:
-    if st.button("⏱️ 節拍", use_container_width=True, type="secondary"): nav_to("metronome")
+    if st.button("⏱️ 節拍", use_container_width=True): nav_to("metronome")
 with nav3:
-    if st.button("📊 數據", use_container_width=True, type="secondary"): nav_to("stats")
+    if st.button("📊 數據", use_container_width=True): nav_to("stats")
 
-st.markdown("<br>", unsafe_allow_html=True)
+st.markdown("---")
 
 # ================= 🏠 主頁 (Dashboard) =================
 if st.session_state.page == "home":
@@ -288,36 +294,35 @@ if st.session_state.page == "home":
     df = st.session_state.history
     total_mins = app.get_total_minutes()
     
-    # 等級邏輯
+    # 計算等級
     level = int(total_mins // 120)
     mins_in_level = total_mins % 120
     mins_needed = 120 - mins_in_level
     progress_pct = (mins_in_level / 120) * 100
     
-    # 稱號
     titles = ["Novice", "Apprentice", "Chopper", "Master", "Legend"]
     current_title = titles[min(level, len(titles)-1)]
 
-    # === Level Card ===
+    # === Level Card (HTML 縮排已修復) ===
     st.markdown(f"""
-    <div class="glass-card">
-        <div class="ios-subhead">MY LEVEL</div>
-        <div style="font-size: 28px; font-weight: 700; color: #FFFFFF;">{current_title} <span style="color:#32D74B">Lv.{level}</span></div>
-        <div style="font-size: 15px; color: #8E8E93; margin-top:4px;">累積訓練 {int(total_mins)} 分鐘</div>
-        
-        <div class="progress-container">
-            <div class="progress-bar" style="width: {progress_pct}%;"></div>
-        </div>
-        <div style="display:flex; justify-content:space-between; margin-top:8px;">
-            <span class="ios-caption">0%</span>
-            <span class="ios-caption" style="color:#FFFFFF">再練 {int(mins_needed)} 分鐘升級</span>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
+<div class="glass-card">
+<div class="ios-subhead">MY LEVEL</div>
+<div style="font-size: 28px; font-weight: 700; color: #FFFFFF;">{current_title} <span style="color:#32D74B">Lv.{level}</span></div>
+<div style="font-size: 15px; color: #8E8E93; margin-top:4px;">累積訓練 {int(total_mins)} 分鐘</div>
+<div class="progress-container">
+<div class="progress-bar" style="width: {progress_pct}%;"></div>
+</div>
+<div style="display:flex; justify-content:space-between; margin-top:8px;">
+<span class="ios-caption">0%</span>
+<span class="ios-caption" style="color:#FFFFFF">再練 {int(mins_needed)} 分鐘升級</span>
+</div>
+</div>
+""", unsafe_allow_html=True)
 
-    # === Stats Summary ===
+    # === 數據卡片 ===
     c1, c2 = st.columns(2)
     days_streak = df['Date'].dt.date.nunique() if not df.empty else 0
+    last_bpm = df.iloc[-1]['BPM'] if not df.empty else 85
     
     with c1:
         st.markdown(f"""
@@ -329,11 +334,10 @@ if st.session_state.page == "home":
         """, unsafe_allow_html=True)
     
     with c2:
-        last_bpm = df.iloc[-1]['BPM'] if not df.empty else 85
         st.markdown(f"""
         <div class="glass-card" style="text-align:center; padding:16px;">
             <div class="ios-subhead">建議速度</div>
-            <div style="font-size: 32px; font-weight: 700; color: #32D74B;">{last_bpm + 5}</div>
+            <div style="font-size: 32px; font-weight: 700; color: #32D74B;">{int(last_bpm + 5)}</div>
             <div class="ios-caption">BPM</div>
         </div>
         """, unsafe_allow_html=True)
@@ -341,7 +345,7 @@ if st.session_state.page == "home":
 # ================= ⏱️ 節拍器 (Metronome) =================
 elif st.session_state.page == "metronome":
     
-    # 頂部：音符選擇 (簡化)
+    # 頂部設置
     col_note, col_ghost = st.columns([2, 1])
     with col_note:
         note_display = {"1/4": "♩ Quarter", "1/8": "♫ Eighth", "1/3": "3 Triplet", "1/16": ":::: Sixteenth"}
@@ -349,72 +353,72 @@ elif st.session_state.page == "metronome":
                                        index=3, label_visibility="collapsed", 
                                        format_func=lambda x: note_display.get(x, x))
     with col_ghost:
-        ghost_mode = st.toggle("Ghost Mode")
+        ghost_mode = st.toggle("Ghost")
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # 中間：BPM 大數字
+    # 大數字顯示
     current_bpm = st.session_state.bpm
     sps = app.calculate_sps(current_bpm, selected_note_key)
     
     st.markdown(f'<div class="bpm-big">{current_bpm}</div>', unsafe_allow_html=True)
     st.markdown(f'<div class="bpm-label">{sps:.1f} 音節 / 秒</div>', unsafe_allow_html=True)
 
-    # 控制區：只保留 Slider 和 Input (刪除左右多餘的按鈕)
+    # 簡單的滑桿 (無多餘方格)
     st.slider("BPM Slider", 50, 200, key="bpm_slider", value=st.session_state.bpm, on_change=update_bpm_from_slider, label_visibility="collapsed")
     
-    # 數字輸入框 (置中)
+    # 數字輸入框
     c_spacer1, c_input, c_spacer2 = st.columns([1, 2, 1])
     with c_input:
         st.number_input("BPM Input", 50, 200, key="bpm_number", value=st.session_state.bpm, on_change=update_bpm_from_number, label_visibility="collapsed")
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # 播放按鈕 (JS Engine)
+    # 播放按鈕
     btn_label = "⏹ 停止訓練" if st.session_state.playing else "▶ 開始訓練"
     if st.button(btn_label, type="primary", use_container_width=True):
         toggle_play()
         st.rerun()
 
-    # 自動保存提示區
+    # 自動保存邏輯 (停止播放後觸發)
     if not st.session_state.playing and st.session_state.start_time:
-        # 剛停止，計算時間
         elapsed = time.time() - st.session_state.start_time
-        elapsed_mins = int(elapsed / 60)
-        if elapsed < 60:
-            st.info(f"本次練習：{int(elapsed)} 秒 (未滿 1 分鐘，不記錄)")
-            st.session_state.start_time = None # 重置
+        elapsed_mins = elapsed / 60
+        
+        # 防止誤觸 (小於 10 秒不存)
+        if elapsed < 10:
+            st.info("練習時間太短，未記錄。")
+            st.session_state.start_time = None
         else:
-            # 顯示自動保存卡片
             st.markdown(f"""
-            <div class="glass-card" style="border-color:#32D74B;">
+            <div class="glass-card" style="border-color:#32D74B; margin-top:20px;">
                 <div class="ios-subhead" style="color:#32D74B">訓練完成</div>
-                <div class="ios-body">檢測到你練習了 <b>{elapsed_mins} 分鐘</b>。</div>
+                <div class="ios-body">本次練習時長：<b>{int(elapsed)} 秒</b> ({elapsed_mins:.1f} 分)</div>
             </div>
             """, unsafe_allow_html=True)
             
             col_save, col_discard = st.columns(2)
             with col_save:
-                if st.button("✅ 確認存檔", use_container_width=True, type="primary"):
+                if st.button("✅ 存檔", use_container_width=True, type="primary"):
                     new_entry = pd.DataFrame([{
                         'Date': datetime.now(),
                         'BPM': current_bpm,
                         'Note_Type': selected_note_key,
                         'SPS': sps,
-                        'Duration': elapsed_mins,
+                        'Duration': round(elapsed_mins, 2),
                         'Focus': "Auto-log"
                     }])
                     st.session_state.history = pd.concat([st.session_state.history, new_entry], ignore_index=True)
                     app.save_data(st.session_state.history)
-                    st.session_state.start_time = None # 存檔後重置
-                    st.toast("已自動保存記錄！")
+                    st.session_state.start_time = None # 重置
+                    st.toast("記錄已保存！")
                     st.rerun()
             with col_discard:
                 if st.button("🗑️ 放棄", use_container_width=True):
                     st.session_state.start_time = None
                     st.rerun()
 
-    # --- JS 音頻引擎 (保持不變) ---
+    # --- 鼓聲版 JS 音頻引擎 ---
     js_bpm = st.session_state.bpm
     js_playing = "true" if st.session_state.playing else "false"
     note_mult = app.note_multipliers.get(selected_note_key, 1)
@@ -434,24 +438,50 @@ elif st.session_state.page == "metronome":
         if (window.metronomeTimer) {{ clearInterval(window.metronomeTimer); window.metronomeTimer = null; }}
         if (!window.beatCount) window.beatCount = 0;
 
-        if (isPlaying) {{
+        // 合成鼓聲函數 (Kick, Snare, Hihat)
+        function playSound(type) {{
             if (window.audioCtx.state === 'suspended') window.audioCtx.resume();
+            var osc = window.audioCtx.createOscillator();
+            var gainNode = window.audioCtx.createGain();
+            osc.connect(gainNode);
+            gainNode.connect(window.audioCtx.destination);
+            var now = window.audioCtx.currentTime;
+
+            if (type === 'kick') {{
+                // 大鼓
+                osc.frequency.setValueAtTime(150, now);
+                osc.frequency.exponentialRampToValueAtTime(0.01, now + 0.5);
+                gainNode.gain.setValueAtTime(1, now);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.5);
+                osc.start(now); osc.stop(now + 0.5);
+            }} else if (type === 'hihat') {{
+                // 腳踏鈸
+                osc.type = 'square';
+                osc.frequency.setValueAtTime(800, now);
+                gainNode.gain.setValueAtTime(0.2, now);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.05);
+                osc.start(now); osc.stop(now + 0.05);
+            }} else {{
+                // 小鼓 (Snare-ish)
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(300, now);
+                gainNode.gain.setValueAtTime(0.4, now);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+                osc.start(now); osc.stop(now + 0.1);
+            }}
+        }}
+
+        if (isPlaying) {{
             window.metronomeTimer = setInterval(() => {{
-                var osc = window.audioCtx.createOscillator();
-                var gainNode = window.audioCtx.createGain();
-                osc.connect(gainNode);
-                gainNode.connect(window.audioCtx.destination);
-                
                 var totalSubPerBar = 4 * subdivisions;
                 var currentPos = window.beatCount % totalSubPerBar;
                 var barNum = Math.floor(window.beatCount / totalSubPerBar) + 1;
                 var isGhostBar = isGhost && (barNum % 4 === 0);
 
                 if (!isGhostBar) {{
-                    if (currentPos === 0) {{ osc.frequency.value = 1200; gainNode.gain.value = 0.8; }} 
-                    else if (currentPos % subdivisions === 0) {{ osc.frequency.value = 800; gainNode.gain.value = 0.6; }} 
-                    else {{ osc.frequency.value = 600; gainNode.gain.value = 0.3; }}
-                    osc.start(); osc.stop(window.audioCtx.currentTime + 0.05);
+                    if (currentPos === 0) {{ playSound('kick'); }} 
+                    else if (currentPos % subdivisions === 0) {{ playSound('snare'); }} 
+                    else {{ playSound('hihat'); }}
                 }}
                 window.beatCount++;
             }}, interval);
@@ -468,18 +498,20 @@ elif st.session_state.page == "stats":
     else:
         df = st.session_state.history
         
-        # CSV Export
+        # 輸出按鈕
         csv = df.to_csv(index=False).encode('utf-8')
         st.download_button("📤 輸出 CSV 記錄", csv, "rap_log.csv", "text/csv", use_container_width=True)
         
         st.markdown("<br>", unsafe_allow_html=True)
         
-        # Charts
+        # 圖表
         st.markdown('<div class="ios-subhead">SPS 趨勢</div>', unsafe_allow_html=True)
-        st.line_chart(df.set_index('Date')['SPS'], color="#32D74B")
+        # 確保日期排序正確
+        chart_df = df.sort_values('Date')
+        st.line_chart(chart_df.set_index('Date')['SPS'], color="#32D74B")
         
+        # 表格
         st.markdown('<div class="ios-subhead">詳細日誌</div>', unsafe_allow_html=True)
-        # 顯示表格，隱藏不需要的欄位
         display_df = df.sort_values('Date', ascending=False)
         display_df['Date'] = display_df['Date'].dt.strftime('%Y-%m-%d %H:%M')
         st.dataframe(
